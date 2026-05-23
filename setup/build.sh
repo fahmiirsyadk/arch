@@ -102,7 +102,27 @@ trap cleanup EXIT
 # ─── Pre-flight ─────────────────────────────────────────────────────
 preflight() {
     log "Running pre-flight checks…"
-    [[ $EUID -ne 0 ]] || fatal "Do not run as root. Run as your normal user; sudo will be invoked when needed."
+
+    # If running as root (e.g. default VM login), create a desktop user
+    if [[ $EUID -eq 0 ]]; then
+        if ! $VM_GL_TWEAKS && ! ask_yn "Running as root. Create a normal user for desktop config?" y; then
+            fatal "Create a normal user first, then re-run."
+        fi
+        local username="${UNIT3_USER:-}"
+        while [[ -z "$username" ]]; do
+            read -rp "$(printf '%s[?]%s Enter username for desktop: ' "$C_YELLOW" "$C_RESET")" username
+            id "$username" &>/dev/null && username="" && warn "User already exists."
+        done
+        log "Creating user: $username"
+        useradd -m -G wheel -s /bin/bash "$username" 2>/dev/null || true
+        echo "Set password for $username:"
+        passwd "$username"
+        echo "$username ALL=(ALL:ALL) ALL" | EDITOR="tee -a" visudo -f /etc/sudoers.d/"$username" >/dev/null
+        ok "User $username created. Re-run as: sudo -u $username bash <script> --vm"
+        echo "  Then log in as $username (or 'su - $username') and run again."
+        exit 0
+    fi
+
     command -v pacman >/dev/null || fatal "pacman not found — this script is for Arch Linux only."
     command -v sudo >/dev/null || fatal "sudo is required."
     command -v git >/dev/null || sudo pacman -S --needed --noconfirm git
