@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-#   Unit-3 build/setup.sh — Arch Linux installation for samyns
+#   Unit-3 build/setup.sh — Arch Linux installation
 #   Machine: Intel i3-1315U, 42GB RAM, Arch Linux (rolling)
 #
-#   For fresh Arch install: run this AFTER base OS is installed,
-#   from the installed system (not the live ISO).
+#   Usage (curl one-liner):
+#     bash <(curl -fsSL https://raw.githubusercontent.com/fahmiirsyadk/arch/main/setup/build.sh)
+#     bash <(curl -fsSL https://raw.githubusercontent.com/fahmiirsyadk/arch/main/setup/build.sh) --vm
+#     bash <(curl -fsSL https://raw.githubusercontent.com/fahmiirsyadk/arch/main/setup/build.sh) --pinned
 #
-#   For just dotfiles on existing Arch: same script, same flow.
+#   Or clone and run locally:
+#     git clone https://github.com/fahmiirsyadk/arch.git
+#     cd arch/setup && bash build.sh
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 # ─── Configuration ──────────────────────────────────────────────────
-readonly REPO_URL="https://github.com/samyns/Unit-3.git"
+readonly REPO_URL="https://github.com/fahmiirsyadk/arch.git"
 readonly REPO_BRANCH="${UNIT3_BRANCH:-main}"
 readonly CLONE_DIR="${TMPDIR:-/tmp}/Unit-3-$$"
 readonly CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
