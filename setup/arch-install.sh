@@ -76,11 +76,21 @@ log "Partitioning $DISK"
 
 echo
 echo "  ${C_BOLD}Choose partition method:${C_RESET}"
-echo "    1) Auto — single ext4 partition using full disk"
+echo "    1) Auto — create partitions and format"
+if [[ -d /sys/firmware/efi ]]; then
+  echo "       (UEFI: 512MB FAT32 EFI + ext4 root)"
+else
+  echo "       (BIOS: single ext4 partition)"
+fi
 echo "    2) Manual — open fdisk (expert mode)"
 echo "    3) Skip — disk already partitioned (just select partition)"
 echo
 read -p "$(printf '%s[?]%s Select [1/2/3]: ' "$C_YELLOW" "$C_RESET")" PART_METHOD
+
+UEFI=false
+if [[ -d /sys/firmware/efi ]]; then
+  UEFI=true
+fi
 
 case "$PART_METHOD" in
   2)
@@ -92,32 +102,42 @@ case "$PART_METHOD" in
     log "Skipping partitioning."
     ;;
   *)
-    log "Auto-partitioning $DISK (single ext4)..."
-    # Wipe existing partition table
-    blkdiscard -f "$DISK" 2>/dev/null || true
-    # Create GPT partition table
-    parted -s "$DISK" mklabel gpt
-    # Create single ext4 partition filling disk
-    parted -s "$DISK" mkpart primary ext4 0% 100%
-    parted -s "$DISK" set 1 boot on
-    sleep 1
+    if $UEFI; then
+      log "Auto-partitioning $DISK (UEFI: EFI + root)..."
+      blkdiscard -f "$DISK" 2>/dev/null || true
+      parted -s "$DISK" mklabel gpt
+      parted -s "$DISK" mkpart primary fat32 1MiB 513MiB
+      parted -s "$DISK" set 1 esp on
+      parted -s "$DISK" mkpart primary ext4 513MiB 100%
+      sleep 1
+    else
+      log "Auto-partitioning $DISK (BIOS: single ext4)..."
+      blkdiscard -f "$DISK" 2>/dev/null || true
+      parted -s "$DISK" mklabel gpt
+      parted -s "$DISK" mkpart primary ext4 0% 100%
+      parted -s "$DISK" set 1 boot on
+      sleep 1
+    fi
     ok "Partition created."
     ;;
 esac
 
-# Detect partition (auto-detect after partitioning)
+# Detect partition names
 detect_partition() {
-  local disk="$1"
+  local disk="$1" num="$2"
   if echo "$disk" | grep -q 'nvme'; then
-    echo "${disk}p1"
-  elif echo "$disk" | grep -q 'mmcblk\|sd[a-z]'; then
-    echo "${disk}1"
+    echo "${disk}p${num}"
   else
-    echo "${disk}1"
+    echo "${disk}${num}"
   fi
 }
 
-PART=$(detect_partition "$DISK")
+if $UEFI; then
+  EFI_PART=$(detect_partition "$DISK" 1)
+  PART=$(detect_partition "$DISK" 2)
+else
+  PART=$(detect_partition "$DISK" 1)
+fi
 
 # If partition doesn't exist, try to find it
 if [[ ! -b "$PART" ]]; then
@@ -138,7 +158,13 @@ ok "Using partition: $PART"
 # ═══════════════════════════════════════════════════════════════
 #  3. FORMAT
 # ═══════════════════════════════════════════════════════════════
-log "Formatting $PART as ext4..."
+if $UEFI; then
+  log "Formatting EFI partition $EFI_PART as FAT32..."
+  mkfs.fat -F 32 "$EFI_PART"
+  log "Formatting root partition $PART as ext4..."
+else
+  log "Formatting $PART as ext4..."
+fi
 mkfs.ext4 -F "$PART"
 ok "Formatted."
 
@@ -147,6 +173,11 @@ ok "Formatted."
 # ═══════════════════════════════════════════════════════════════
 log "Mounting $PART to /mnt..."
 mount "$PART" /mnt
+if $UEFI; then
+  mkdir -p /mnt/boot
+  mount "$EFI_PART" /mnt/boot
+  ok "Mounted EFI at /mnt/boot"
+fi
 ok "Mounted."
 
 # ═══════════════════════════════════════════════════════════════
@@ -155,7 +186,7 @@ ok "Mounted."
 log "Installing base system (pacstrap)..."
 echo "  This may take a few minutes."
 pacstrap -K /mnt base base-devel linux linux-firmware \
-  sudo grub networkmanager vim git
+  sudo grub networkmanager vim git efibootmgr
 ok "Base system installed."
 
 # ═══════════════════════════════════════════════════════════════
@@ -200,7 +231,11 @@ echo "\$USERNAME ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/\$USERNAME
 chmod 440 /etc/sudoers.d/\$USERNAME
 
 # Bootloader
-grub-install ${DISK}
+if ${UEFI}; then
+  grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+else
+  grub-install ${DISK}
+fi
 grub-mkconfig -o /boot/grub/grub.cfg
 
 # Network
