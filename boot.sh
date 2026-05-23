@@ -21,6 +21,26 @@ ARCH_REPO="${ARCH_REPO:-fahmiirsyadk/arch}"
 ARCH_RAW="https://raw.githubusercontent.com/$ARCH_REPO/$ARCH_BRANCH"
 ARCH_DEST="$HOME/.local/share/arch"
 
+# ─── Live ISO check — offer interactive installer ─────────────────
+if [[ -d /run/archiso ]] || mount | grep -q 'overlay on /'; then
+  echo "[!] You are running from the Arch Linux live ISO."
+  echo "    The system is not installed yet."
+  echo
+  echo "    Choose:"
+  echo "      1) Full interactive install (partition → pacstrap → chroot → reboot)"
+  echo "      2) Exit — I'll install manually first"
+  echo
+  read -p "Select [1/2]: " CHOICE
+  if [[ "$CHOICE" != "2" ]]; then
+    echo -e "\n[*] Launching interactive installer..."
+    # Fetch and run the interactive installer script
+    bash <(curl -fsSL "$ARCH_RAW/setup/arch-install.sh")
+    exit 0
+  fi
+  echo "Exiting. Install Arch manually, then run boot.sh again."
+  exit 0
+fi
+
 # ─── Root check — create user if running as root ───────────────────
 if (( EUID == 0 )); then
   echo "Running as root. Creating a desktop user..."
