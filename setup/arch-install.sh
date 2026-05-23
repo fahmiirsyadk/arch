@@ -69,30 +69,68 @@ DISK="/dev/$DISK"
 ask_yn "Are you sure you want to erase ALL data on $DISK?" n || fatal "Aborted."
 
 # ═══════════════════════════════════════════════════════════════
-#  2. PARTITION (cfdisk)
+#  2. PARTITION (interactive CLI)
 # ═══════════════════════════════════════════════════════════════
 echo
-log "Opening cfdisk to partition $DISK"
-echo "  ─ Create a single Linux filesystem partition filling the disk."
-echo "  ─ Type: Linux filesystem (ext4)"
-echo "  ─ Then: Write → Quit"
+log "Partitioning $DISK"
+
 echo
-ask_yn "Launch cfdisk now?" y || fatal "Aborted."
-cfdisk "$DISK"
+echo "  ${C_BOLD}Choose partition method:${C_RESET}"
+echo "    1) Auto — single ext4 partition using full disk"
+echo "    2) Manual — open fdisk (expert mode)"
+echo "    3) Skip — disk already partitioned (just select partition)"
+echo
+read -p "$(printf '%s[?]%s Select [1/2/3]: ' "$C_YELLOW" "$C_RESET")" PART_METHOD
 
-# Detect partition name
-if echo "$DISK" | grep -q 'nvme'; then
-  PART="${DISK}p1"
-else
-  PART="${DISK}1"
-fi
+case "$PART_METHOD" in
+  2)
+    log "Opening fdisk for $DISK..."
+    echo "  Commands: g (GPT), n (new), w (write)"
+    fdisk "$DISK"
+    ;;
+  3)
+    log "Skipping partitioning."
+    ;;
+  *)
+    log "Auto-partitioning $DISK (single ext4)..."
+    # Wipe existing partition table
+    blkdiscard -f "$DISK" 2>/dev/null || true
+    # Create GPT partition table
+    parted -s "$DISK" mklabel gpt
+    # Create single ext4 partition filling disk
+    parted -s "$DISK" mkpart primary ext4 0% 100%
+    parted -s "$DISK" set 1 boot on
+    sleep 1
+    ok "Partition created."
+    ;;
+esac
 
+# Detect partition (auto-detect after partitioning)
+detect_partition() {
+  local disk="$1"
+  if echo "$disk" | grep -q 'nvme'; then
+    echo "${disk}p1"
+  elif echo "$disk" | grep -q 'mmcblk\|sd[a-z]'; then
+    echo "${disk}1"
+  else
+    echo "${disk}1"
+  fi
+}
+
+PART=$(detect_partition "$DISK")
+
+# If partition doesn't exist, try to find it
 if [[ ! -b "$PART" ]]; then
-  warn "$PART not found. Trying to detect..."
-  PART="$(lsblk -lno NAME "$DISK" | tail -1)"
-  [[ -n "$PART" ]] && PART="/dev/$PART"
-  if [[ ! -b "$PART" ]]; then
-    fatal "Could not detect partition on $DISK"
+  warn "$PART not found. Scanning available partitions..."
+  lsblk -lno NAME,TYPE "$DISK" | grep 'part' | head -1
+  FOUND_PART=$(lsblk -lno NAME "$DISK" | grep -v "$(basename "$DISK")" | head -1)
+  if [[ -n "$FOUND_PART" ]]; then
+    PART="/dev/$FOUND_PART"
+    ok "Found: $PART"
+  else
+    warn "No partition found. Enter manually (e.g. sda1):"
+    read -p "$(printf '%s[?]%s Partition: ' "$C_YELLOW" "$C_RESET")" MANUAL_PART
+    PART="/dev/$MANUAL_PART"
   fi
 fi
 ok "Using partition: $PART"
