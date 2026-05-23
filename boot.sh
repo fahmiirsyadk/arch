@@ -22,7 +22,10 @@ ARCH_RAW="https://raw.githubusercontent.com/$ARCH_REPO/$ARCH_BRANCH"
 ARCH_DEST="$HOME/.local/share/arch"
 
 # ─── Live ISO check — offer interactive installer ─────────────────
-if [[ -d /run/archiso ]] || mount | grep -q 'overlay on /'; then
+if [[ -d /run/archiso ]] || [[ -f /etc/archiso ]] || \
+   grep -q 'archiso' /proc/cmdline 2>/dev/null || \
+   grep -q '/run/archiso' /proc/mounts 2>/dev/null; then
+  # Either on live ISO OR very low disk space
   echo "[!] You are running from the Arch Linux live ISO."
   echo "    The system is not installed yet."
   echo
@@ -73,7 +76,12 @@ if ! sudo test -s /etc/pacman.d/mirrorlist; then
 fi
 
 echo "[*] Updating system and installing git..."
-sudo pacman -Syu --noconfirm --needed git
+if [[ $(df --output=avail / | tail -1) -lt 500000 ]]; then
+  echo "[!] Very low disk space (<500MB). Skipping system upgrade."
+  sudo pacman -S --noconfirm --needed git
+else
+  sudo pacman -Syu --noconfirm --needed git
+fi
 
 # ─── Clone repo ────────────────────────────────────────────────────
 echo -e "\n[*] Cloning $ARCH_REPO ($ARCH_BRANCH)..."
